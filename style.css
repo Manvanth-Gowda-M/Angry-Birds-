@@ -1,0 +1,263 @@
+/* FILE: style.css */
+
+/* ─── Reset ─── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --brand:        #ff5533;
+  --brand2:       #ffa500;
+  --bg-dark:      #0a0c14;
+  --glass:        rgba(10, 12, 20, 0.72);
+  --glass-border: rgba(255,255,255,0.12);
+  --text:         #f0f0f0;
+  --text-dim:     #aaa;
+  --radius:       12px;
+  --font:         'Outfit', system-ui, sans-serif;
+}
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #0a0c14;
+  font-family: var(--font);
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ─── Game Canvas ─── */
+#game-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  z-index: 0;
+}
+
+/* ─── Webcam (hidden) ─── */
+#webcam {
+  display: none;
+  position: absolute;
+  width: 1px; height: 1px;
+  pointer-events: none;
+}
+
+/* ─── Landmark Overlay ─── */
+#landmark-overlay {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 240px;
+  height: 180px;
+  z-index: 10;
+  border-radius: var(--radius);
+  border: 1px solid var(--glass-border);
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  /* Mirror the display so it looks natural */
+  transform: scaleX(-1);
+}
+
+/* ─── HUD ─── */
+#hud {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.hud-item {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--radius);
+  padding: 8px 18px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  min-width: 130px;
+  transition: transform 0.15s;
+}
+.hud-item.pulse {
+  transform: scale(1.12);
+  color: var(--brand2);
+}
+
+/* ─── Instruction Banner ─── */
+#instruction-banner {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 99px;
+  padding: 10px 28px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ─── Loading Screen ─── */
+#loading {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: radial-gradient(ellipse at 50% 40%, #1a0a2e, #0a0c14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.5s;
+}
+#loading.fade-out { opacity: 0; pointer-events: none; }
+#loading.gone     { display: none; }
+
+.loading-inner {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.spinner {
+  width: 56px; height: 56px;
+  border: 5px solid rgba(255,85,51,0.2);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#loading-status {
+  font-size: 1rem;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+}
+
+/* ─── Game Over Overlay ─── */
+#game-over {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0,0,0,0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#game-over.hidden { display: none; }
+
+.game-over-card {
+  background: rgba(12,14,24,0.97);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  padding: 52px 68px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  animation: popIn 0.4s cubic-bezier(0.34,1.56,0.64,1);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+}
+@keyframes popIn {
+  from { transform: scale(0.85); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+.go-emoji { font-size: 4rem; }
+.go-title {
+  font-size: 2.4rem;
+  font-weight: 900;
+  background: linear-gradient(135deg, var(--brand), var(--brand2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.go-score { font-size: 1.1rem; color: var(--text-dim); }
+.go-btn {
+  margin-top: 8px;
+  background: linear-gradient(135deg, var(--brand), var(--brand2));
+  border: none;
+  border-radius: 99px;
+  padding: 14px 40px;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: var(--font);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 24px rgba(255,85,51,0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.go-btn:hover { transform: scale(1.06); box-shadow: 0 6px 32px rgba(255,85,51,0.5); }
+
+/* ─── Camera Error ─── */
+#camera-error {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#camera-error.hidden { display: none; }
+
+.error-card {
+  background: rgba(12,14,24,0.97);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 40px 52px;
+  text-align: center;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.error-card h2 { font-size: 1.6rem; color: var(--brand); }
+.error-card .hint { font-size: 0.85rem; color: var(--text-dim); }
+
+/* ─── Debug Panel ─── */
+#debug-panel {
+  position: fixed;
+  bottom: 70px;
+  right: 16px;
+  z-index: 30;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  font-size: 0.78rem;
+  font-family: 'Courier New', monospace;
+  color: #0f0;
+  min-width: 200px;
+  pointer-events: none;
+}
+#debug-panel.hidden { display: none; }
+
+.debug-row { margin-bottom: 4px; }
+.debug-row span { color: #ff0; }
+
+/* ─── Responsive ─── */
+@media (max-width: 600px) {
+  #landmark-overlay { width: 160px; height: 120px; }
+  .game-over-card { padding: 32px 24px; }
+  #instruction-banner { font-size: 0.7rem; padding: 8px 16px; white-space: normal; text-align: center; }
+}
