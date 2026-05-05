@@ -33,9 +33,11 @@ export function createBox(w, h, d, mass, material = null, meshOpts = {}) {
   // Three.js mesh
   const geo  = new THREE.BoxGeometry(w, h, d);
   const mat  = new THREE.MeshStandardMaterial({
-    color:     meshOpts.color     ?? 0x8b6914,
-    roughness: meshOpts.roughness ?? 0.8,
-    metalness: meshOpts.metalness ?? 0.05,
+    color:       meshOpts.color       ?? 0x8b6914,
+    roughness:   meshOpts.roughness   ?? 0.8,
+    metalness:   meshOpts.metalness   ?? 0.05,
+    transparent: meshOpts.transparent ?? false,
+    opacity:     meshOpts.opacity     ?? 1.0,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow    = true;

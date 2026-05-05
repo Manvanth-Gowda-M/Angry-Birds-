@@ -2,12 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Angry Birds 3D — Hand Gesture Edition</title>
-  <meta name="description" content="3D Angry Birds clone controlled by real-time hand gestures via webcam. Built with Three.js, Cannon-es, and MediaPipe.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0a0c14">
+  <title>Angry Birds AR — Hand Gesture Edition</title>
+  <meta name="description" content="Premium 3D Angry Birds with real-time hand gestures. Built with Three.js, Cannon-es, and MediaPipe.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 
   <!-- ═══ Import Map: Three.js r160 ESM ═══ -->
@@ -27,42 +30,41 @@
 </head>
 <body>
 
-  <!-- ═══════════════════════════════════════════════════
-       GAME CANVAS
-  ═══════════════════════════════════════════════════ -->
+  <!-- ═══ GAME CANVAS ═══ -->
   <canvas id="game-canvas" aria-label="3D Angry Birds Game Canvas"></canvas>
 
-  <!-- ═══════════════════════════════════════════════════
-       WEBCAM VIDEO (hidden — fed to MediaPipe)
-  ═══════════════════════════════════════════════════ -->
+  <!-- ═══ WEBCAM VIDEO (hidden — fed to MediaPipe) ═══ -->
   <video id="webcam" playsinline autoplay muted aria-hidden="true"></video>
 
-  <!-- ═══════════════════════════════════════════════════
-       HAND LANDMARK OVERLAY (top-right corner)
-  ═══════════════════════════════════════════════════ -->
-  <canvas id="landmark-overlay" width="240" height="180"
-          aria-label="Hand tracking view" title="Hand tracking camera"></canvas>
+  <!-- ═══ HAND LANDMARK OVERLAY ═══ -->
+  <div id="hand-overlay-wrap" title="Hand tracking camera">
+    <canvas id="landmark-overlay" width="240" height="180"
+            aria-label="Hand tracking view"></canvas>
+    <div id="hand-status">👁 Detecting hand…</div>
+  </div>
 
-  <!-- ═══════════════════════════════════════════════════
-       HUD
-  ═══════════════════════════════════════════════════ -->
+  <!-- ═══ HUD ═══ -->
   <div id="hud" aria-live="polite">
-    <div class="hud-item" id="score-display">Score: 0</div>
-    <div class="hud-item" id="birds-display">Birds: 5</div>
-    <div class="hud-item" id="level-display">Level 1</div>
+    <div class="hud-item hud-score">
+      <span class="hud-icon">🏆</span>
+      <span id="score-display">0</span>
+    </div>
+    <div class="hud-item hud-level">
+      <span class="hud-icon">🗺</span>
+      <span id="level-display">Level 1</span>
+    </div>
   </div>
 
-  <!-- ═══════════════════════════════════════════════════
-       INSTRUCTION BANNER
-  ═══════════════════════════════════════════════════ -->
+  <!-- ═══ BIRD QUEUE (bottom-centre) ═══ -->
+  <div id="bird-queue" aria-label="Upcoming birds"></div>
+
+  <!-- ═══ INSTRUCTION BANNER ═══ -->
   <div id="instruction-banner" aria-label="Game instructions">
-    🤌 Pinch &amp; pull to aim · Release to fire &nbsp;|&nbsp;
-    SPACE = mouse mode · R = reset · D = debug · C = orbit cam
+    <span class="ib-desktop">🤌 Pinch &amp; pull to aim · Release to fire &nbsp;|&nbsp; SPACE = mouse · A = activate · R = reset</span>
+    <span class="ib-mobile">👆 Drag to aim · Release to fire · Tap in-flight to activate</span>
   </div>
 
-  <!-- ═══════════════════════════════════════════════════
-       DEBUG PANEL
-  ═══════════════════════════════════════════════════ -->
+  <!-- ═══ DEBUG PANEL ═══ -->
   <div id="debug-panel" class="hidden" aria-label="Debug panel">
     <div class="debug-row">FPS: <span id="dbg-fps">—</span></div>
     <div class="debug-row">Bodies: <span id="dbg-bodies">—</span></div>
@@ -70,24 +72,36 @@
     <div class="debug-row">Pinch: <span id="dbg-pinch">—</span></div>
   </div>
 
-  <!-- ═══════════════════════════════════════════════════
-       LOADING SCREEN
-  ═══════════════════════════════════════════════════ -->
+  <!-- ═══ SCORE POPUP LAYER ═══ -->
+  <div id="score-popups" aria-live="assertive" aria-atomic="false"></div>
+
+  <!-- ═══ LOADING SCREEN ═══ -->
   <div id="loading" aria-label="Loading screen" aria-live="polite">
     <div class="loading-inner">
+      <div class="loading-logo">
+        <div class="loading-bird">😡</div>
+        <h1 class="loading-title">Angry Birds <span>AR</span></h1>
+      </div>
       <div class="spinner"></div>
-      <h1 style="font-size:2.2rem;font-weight:900;
-                 background:linear-gradient(135deg,#ff5533,#ffa500);
-                 -webkit-background-clip:text;-webkit-text-fill-color:transparent;">
-        Angry Birds 3D
-      </h1>
-      <p id="loading-status" style="color:#aaa;letter-spacing:.08em;">Initialising…</p>
+      <p id="loading-status">Initialising…</p>
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════════════════════
-       GAME OVER OVERLAY
-  ═══════════════════════════════════════════════════ -->
+  <!-- ═══ LEVEL COMPLETE OVERLAY ═══ -->
+  <div id="level-complete" class="hidden" role="dialog" aria-modal="true" aria-label="Level Complete">
+    <div class="level-complete-card">
+      <div class="lc-title">Level Complete! 🎉</div>
+      <div class="stars-row">
+        <span class="star" id="star-1">⭐</span>
+        <span class="star" id="star-2">⭐</span>
+        <span class="star" id="star-3">⭐</span>
+      </div>
+      <div class="lc-score">Score: <strong id="lc-score">0</strong></div>
+      <button class="go-btn" id="next-level-btn">Next Level →</button>
+    </div>
+  </div>
+
+  <!-- ═══ GAME OVER OVERLAY ═══ -->
   <div id="game-over" class="hidden" role="dialog" aria-modal="true" aria-label="Game Over">
     <div class="game-over-card">
       <div class="go-emoji">😡</div>
@@ -97,25 +111,20 @@
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════════════════════
-       CAMERA ERROR OVERLAY
-  ═══════════════════════════════════════════════════ -->
+  <!-- ═══ CAMERA ERROR OVERLAY ═══ -->
   <div id="camera-error" class="hidden" role="alert" aria-label="Camera not available">
     <div class="error-card">
       <h2>📷 No Camera</h2>
-      <p>Could not access webcam. Playing in <strong>mouse mode</strong> instead.</p>
-      <p class="hint">Click &amp; drag on the canvas to aim and release to shoot.<br>
-        Press <kbd>SPACE</kbd> to toggle mouse mode at any time.</p>
+      <p>Could not access webcam. Playing in <strong>touch / mouse mode</strong>.</p>
+      <p class="hint">Drag to aim · Release to fire · Tap while flying to activate power</p>
       <button class="go-btn" style="margin-top:8px"
               onclick="document.getElementById('camera-error').classList.add('hidden')">
-        Play with Mouse →
+        Play without Camera →
       </button>
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════════════════════
-       MAIN ENTRY POINT (ES Module)
-  ═══════════════════════════════════════════════════ -->
+  <!-- ═══ MAIN ENTRY POINT ═══ -->
   <script type="module" src="src/main.js"></script>
 </body>
 </html>
