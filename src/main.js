@@ -1,56 +1,67 @@
-// FILE: src/main.js
-// GameController — wires all modules together and runs the rAF game loop.
+// FILE: src/main.js — GameController
 
 import * as THREE from 'three';
 
 // Core
-import { Renderer }     from './core/renderer.js';
-import { SceneSetup }   from './core/scene.js';
-import { Camera }       from './core/camera.js';
+import { Renderer }   from './core/renderer.js';
+import { SceneSetup } from './core/scene.js';
+import { Camera }     from './core/camera.js';
 
 // Physics
 import { PhysicsWorld } from './physics/world.js';
 
 // Game
-import { Bird }         from './game/bird.js';
-import { Slingshot }    from './game/slingshot.js';
-import { Level }        from './game/level.js';
-import { ScoreManager } from './game/scoreManager.js';
+import { Bird, BirdType }   from './game/bird.js';
+import { Slingshot }         from './game/slingshot.js';
+import { Level }             from './game/level.js';
+import { ScoreManager }      from './game/scoreManager.js';
+import { ParticleSystem }    from './game/particles.js';
 
 // Vision
-import { HandTracker }        from './vision/handTracking.js';
-import { GestureDetector }    from './vision/gesture.js';
-import { CoordinateMapper }   from './vision/coordinateMapper.js';
+import { HandTracker }      from './vision/handTracking.js';
+import { GestureDetector }  from './vision/gesture.js';
+import { CoordinateMapper } from './vision/coordinateMapper.js';
 
 // Utils
 import { LandmarkSmoother } from './utils/smoothing.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const ANCHOR_POSITION  = new THREE.Vector3(-8, 3, 0);
-const TOTAL_BIRDS      = 5;
-const NEXT_BIRD_DELAY  = 3000;  // ms
-const MAX_LEVELS       = 3;
+const ANCHOR_POSITION = new THREE.Vector3(-8, 3, 0);
+const NEXT_BIRD_DELAY = 2800;   // ms
+const MAX_LEVELS      = 5;
 
-// ─── DOM Elements ────────────────────────────────────────────────────────────
-const videoEl      = document.getElementById('webcam');
-const overlayEl    = document.getElementById('landmark-overlay');
-const loadingEl    = document.getElementById('loading');
-const loadStatusEl = document.getElementById('loading-status');
-const gameOverEl   = document.getElementById('game-over');
-const finalScoreEl = document.getElementById('final-score');
-const playAgainBtn = document.getElementById('play-again-btn');
-const cameraErrEl  = document.getElementById('camera-error');
-const debugPanel   = document.getElementById('debug-panel');
-const birdsDisplay = document.getElementById('birds-display');
-const levelDisplay = document.getElementById('level-display');
+/** Per-level bird queues (cycle if level > defined). */
+const LEVEL_BIRD_QUEUES = {
+  1: [BirdType.RED,    BirdType.RED,    BirdType.YELLOW, BirdType.RED,    BirdType.RED],
+  2: [BirdType.YELLOW, BirdType.RED,    BirdType.BLUE,   BirdType.RED,    BirdType.YELLOW],
+  3: [BirdType.BLUE,   BirdType.RED,    BirdType.YELLOW, BirdType.BLUE,   BirdType.RED],
+  4: [BirdType.BLACK,  BirdType.RED,    BirdType.YELLOW, BirdType.BLACK,  BirdType.RED],
+  5: [BirdType.RED,    BirdType.BLACK,  BirdType.YELLOW, BirdType.BLUE,   BirdType.BLACK],
+};
 
-// Debug readouts
+// ─── DOM elements ─────────────────────────────────────────────────────────────
+const videoEl          = document.getElementById('webcam');
+const overlayEl        = document.getElementById('landmark-overlay');
+const loadingEl        = document.getElementById('loading');
+const loadStatusEl     = document.getElementById('loading-status');
+const gameOverEl       = document.getElementById('game-over');
+const finalScoreEl     = document.getElementById('final-score');
+const playAgainBtn     = document.getElementById('play-again-btn');
+const cameraErrEl      = document.getElementById('camera-error');
+const debugPanel       = document.getElementById('debug-panel');
+const levelDisplayEl   = document.getElementById('level-display');
+const levelCompleteEl  = document.getElementById('level-complete');
+const lcScoreEl        = document.getElementById('lc-score');
+const nextLevelBtn     = document.getElementById('next-level-btn');
+const birdQueueEl      = document.getElementById('bird-queue');
+const handStatusEl     = document.getElementById('hand-status');
+
 const dbgFps     = document.getElementById('dbg-fps');
 const dbgBodies  = document.getElementById('dbg-bodies');
 const dbgGesture = document.getElementById('dbg-gesture');
 const dbgPinch   = document.getElementById('dbg-pinch');
 
-// ─── GameController ──────────────────────────────────────────────────────────
+// ─── GameController ───────────────────────────────────────────────────────────
 class GameController {
   constructor() {
     // Modules
@@ -61,104 +72,112 @@ class GameController {
     this.level          = null;
     this.scoreManager   = null;
     this.slingshot      = null;
+    this.particles      = null;
     this.currentBird    = null;
-    this.smoother       = null;
-    this.gestureDetector= null;
-    this.mapper         = null;
-    this.handTracker    = null;
+    this.activeBirds    = [];    // includes split birds
+
+    // Vision
+    this.smoother        = null;
+    this.gestureDetector = null;
+    this.mapper          = null;
+    this.handTracker     = null;
 
     // State
-    this._birdsRemaining = TOTAL_BIRDS;
     this._currentLevel   = 1;
+    this._birdQueue      = [];
+    this._birdIndex      = 0;
     this._mouseMode      = false;
     this._debugVisible   = false;
     this._lastTime       = 0;
     this._running        = false;
 
-    // FPS tracking
+    // FPS
     this._fpsFrames = 0;
     this._fpsTimer  = 0;
     this._fps       = 0;
 
-    // Mouse fallback
-    this._mouseDown    = false;
-    this._raycaster    = new THREE.Raycaster();
-    this._mousePlane   = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    // Mouse / touch fallback
+    this._mouseDown  = false;
+    this._raycaster  = new THREE.Raycaster();
+    this._mousePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // INIT (Spec §3.14 — exact order)
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ═══ INIT ═══════════════════════════════════════════════════════════════════
   async init() {
     this._updateLoadStatus('Setting up renderer…');
-
-    // 1. Renderer
     this.rendererModule = new Renderer();
 
-    // 2. Scene
     this._updateLoadStatus('Building scene…');
-    this.sceneModule = new SceneSetup(this.rendererModule);
-
-    // 3. Camera
+    this.sceneModule  = new SceneSetup(this.rendererModule);
     this.cameraModule = new Camera(this.rendererModule);
 
-    // 4. Physics World
-    this._updateLoadStatus('Starting physics engine…');
+    this._updateLoadStatus('Starting physics…');
     this.physicsWorld = new PhysicsWorld();
 
-    // 5–6. Level
-    this._updateLoadStatus('Building level…');
+    // Particles
+    this.particles = new ParticleSystem(this.sceneModule);
+
+    // Score manager
     this.scoreManager = new ScoreManager(this.physicsWorld);
-    this.level = new Level(this.sceneModule, this.physicsWorld, this.scoreManager);
+    this.scoreManager.onPoints = (pts) => {
+      // Trigger camera shake on big hits
+      if (pts > 80) this.cameraModule.shake(0.18 + pts / 1000, 0.3);
+    };
+
+    // Level
+    this._updateLoadStatus('Building level…');
+    this.level = new Level(this.sceneModule, this.physicsWorld, this.scoreManager, this.particles);
+    this.level.onPigKilled = (pos) => {
+      const sp = this._worldToScreen(pos);
+      this.scoreManager.awardBonus(500, 'pig', sp);
+      this.cameraModule.shake(0.28, 0.45);
+    };
+    this.level.onBlockHit = (_pos, _color) => {};
     this.level.build(this._currentLevel);
     this._updateLevelHUD();
 
-    // 7. Score manager already created above
-
-    // 8. Slingshot
+    // Slingshot
     this.slingshot = new Slingshot(this.sceneModule, this.physicsWorld, ANCHOR_POSITION);
 
-    // 9–10. First bird
-    this.currentBird = new Bird(this.sceneModule, this.physicsWorld);
-    this.slingshot.attachBird(this.currentBird);
-    this._updateBirdsHUD();
+    // Bird queue + first bird
+    this._buildBirdQueue(this._currentLevel);
+    this._spawnBirdFromQueue();
 
-    // 11–13. Vision helpers
-    this.smoother        = new LandmarkSmoother(0.2, 21);
+    // Post-processing (after scene + camera created)
+    this.rendererModule.initPostProcessing(this.sceneModule.scene, this.cameraModule.cam);
+
+    // Vision
+    this.smoother        = new LandmarkSmoother(0.22, 21);
     this.gestureDetector = new GestureDetector();
     this.mapper          = new CoordinateMapper(this.cameraModule.cam, ANCHOR_POSITION);
 
-    // 14–15. Hand tracking
     this._updateLoadStatus('Requesting webcam…');
     await this._initVision();
 
-    // Keyboard shortcuts
     this._setupKeyboard();
-
-    // Mouse fallback (always active, activated by Space or on camera error)
     this._setupMouseFallback();
 
-    // Play-again button
     playAgainBtn.addEventListener('click', () => this.reset());
+    nextLevelBtn.addEventListener('click', () => this._proceedNextLevel());
 
-    // Dismiss loading screen
     this._hideLoading();
-
-    // 16. Start game loop
     this._running = true;
-    requestAnimationFrame((t) => this._gameLoop(t));
+    requestAnimationFrame(t => this._gameLoop(t));
   }
 
-  // ─── Vision init ─────────────────────────────────────────────────────────
+  // ─── Vision ───────────────────────────────────────────────────────
   async _initVision() {
     try {
       this.handTracker = new HandTracker(
-        videoEl,
-        overlayEl,
-        (landmarks) => this._onHandResults(landmarks)
+        videoEl, overlayEl,
+        (lm) => this._onHandResults(lm),
+        (detected) => {
+          if (handStatusEl) {
+            handStatusEl.textContent = detected ? '✋ Hand detected' : '👁 Detecting hand…';
+          }
+        }
       );
       await this.handTracker.start();
-      console.info('[Game] Hand tracking active');
     } catch (err) {
       console.warn('[Game] Camera unavailable:', err.message);
       cameraErrEl.classList.remove('hidden');
@@ -166,23 +185,20 @@ class GameController {
     }
   }
 
-  // ─── Hand results callback (Spec §3.14 onHandResults) ────────────────────
   _onHandResults(rawLandmarks) {
-    if (this._mouseMode) return;  // Mouse mode overrides
+    if (this._mouseMode) return;
 
-    const smoothed = this.smoother.smooth(rawLandmarks);
-    const pinching = this.gestureDetector.isPinching(smoothed);
-    const midpoint = this.gestureDetector.getPinchMidpoint(smoothed);
-    const pos3D    = this.mapper.map(midpoint.x, midpoint.y);
+    const smoothed  = this.smoother.smooth(rawLandmarks);
+    const pinching  = this.gestureDetector.isPinching(smoothed);
+    const midpoint  = this.gestureDetector.getPinchMidpoint(smoothed);
+    const pos3D     = this.mapper.map(midpoint.x, midpoint.y);
     const pinchDist = this.gestureDetector.pinchDistance(smoothed);
 
-    // Update debug readouts
     if (this._debugVisible) {
       dbgGesture.textContent = this.slingshot.state;
       dbgPinch.textContent   = pinchDist.toFixed(3);
     }
 
-    // State transitions
     if (pinching && this.slingshot.state === 'idle') {
       this.slingshot.grab(pos3D);
     } else if (pinching && this.slingshot.state === 'grabbed') {
@@ -193,33 +209,179 @@ class GameController {
     }
   }
 
-  // ─── Mouse fallback (Spec §6) ────────────────────────────────────────────
+  // ─── Bird lifecycle ────────────────────────────────────────────────
+  _buildBirdQueue(level) {
+    const queue = LEVEL_BIRD_QUEUES[level] ?? LEVEL_BIRD_QUEUES[1];
+    this._birdQueue = [...queue];
+    this._birdIndex = 0;
+    this._renderBirdQueueHUD();
+  }
+
+  _spawnBirdFromQueue() {
+    if (this._birdIndex >= this._birdQueue.length) {
+      // Out of birds
+      this._checkLevelEnd();
+      return;
+    }
+
+    const type = this._birdQueue[this._birdIndex];
+    this.currentBird = new Bird(this.sceneModule, this.physicsWorld, type);
+    this.activeBirds = [this.currentBird];
+
+    // Black bird explosion callback
+    this.currentBird.onExplode = (pos) => {
+      this.particles.spawnDebris(pos, 0x333333, 15);
+      this.particles.spawnImpactFlash(pos, 0xff4400);
+      this.cameraModule.shake(0.5, 0.5);
+    };
+
+    this.slingshot.attachBird(this.currentBird);
+    this._renderBirdQueueHUD();
+  }
+
+  _scheduleNextBird() {
+    setTimeout(() => {
+      this._birdIndex++;
+      this._spawnBirdFromQueue();
+    }, NEXT_BIRD_DELAY);
+  }
+
+  _checkLevelEnd() {
+    if (this.level.isCleared()) {
+      setTimeout(() => this._showLevelComplete(), 1200);
+    } else {
+      setTimeout(() => this._showGameOver(false), 800);
+    }
+  }
+
+  // ─── Split birds (Blue bird) ────────────────────────────────────────
+  _handleSplitBirds(splits) {
+    if (!splits || splits.length === 0) return;
+    splits.forEach(b => {
+      b.onExplode = null;
+      this.activeBirds.push(b);
+    });
+  }
+
+  // ─── Level complete ────────────────────────────────────────────────
+  _showLevelComplete() {
+    const birdsUsed = this._birdIndex + 1;
+    const birdsLeft = Math.max(0, this._birdQueue.length - birdsUsed);
+
+    // Star rating
+    let stars = 1;
+    if (birdsLeft >= 2) stars = 3;
+    else if (birdsLeft >= 1) stars = 2;
+
+    ['star-1','star-2','star-3'].forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (i < stars) el.classList.remove('inactive');
+      else           el.classList.add('inactive');
+    });
+
+    // Bonus score for remaining birds
+    if (birdsLeft > 0) {
+      const bonus = birdsLeft * 1500;
+      this.scoreManager.awardBonus(bonus, 'win');
+    }
+
+    if (lcScoreEl) lcScoreEl.textContent = this.scoreManager.getScore().toLocaleString();
+    levelCompleteEl.classList.remove('hidden');
+  }
+
+  _proceedNextLevel() {
+    levelCompleteEl.classList.add('hidden');
+    if (this._currentLevel >= MAX_LEVELS) {
+      this._showGameOver(true);
+      return;
+    }
+    this._currentLevel++;
+    this.level.reset();
+    this.level.build(this._currentLevel);
+    this._updateLevelHUD();
+
+    this._buildBirdQueue(this._currentLevel);
+    this._spawnBirdFromQueue();
+  }
+
+  // ─── Game over ────────────────────────────────────────────────────
+  _showGameOver(win = false) {
+    finalScoreEl.textContent = this.scoreManager.getScore().toLocaleString();
+    document.querySelector('.go-emoji').textContent = win ? '🏆' : '😡';
+    document.querySelector('.go-title').textContent = win ? 'You Win!' : 'Game Over';
+    gameOverEl.classList.remove('hidden');
+  }
+
+  reset() {
+    gameOverEl.classList.add('hidden');
+    levelCompleteEl.classList.add('hidden');
+
+    this._currentLevel = 1;
+    this.scoreManager.reset();
+
+    this.level.reset();
+    this.level.build(this._currentLevel);
+    this._updateLevelHUD();
+
+    this._buildBirdQueue(this._currentLevel);
+    this._spawnBirdFromQueue();
+    this.slingshot.state = 'idle';
+    this.smoother?.reset();
+  }
+
+  // ─── Keyboard shortcuts ────────────────────────────────────────────
+  _setupKeyboard() {
+    window.addEventListener('keydown', (e) => {
+      switch (e.code) {
+        case 'Space':
+          this._mouseMode = !this._mouseMode;
+          break;
+        case 'KeyR':
+          this.reset();
+          break;
+        case 'KeyD':
+          this._debugVisible = !this._debugVisible;
+          debugPanel.classList.toggle('hidden', !this._debugVisible);
+          break;
+        case 'KeyA':
+          this._activateCurrentBird();
+          break;
+      }
+    });
+  }
+
+  _activateCurrentBird() {
+    if (!this.currentBird || this.currentBird.state !== 'flying') return;
+    const splits = this.currentBird.activate();
+    if (splits) this._handleSplitBirds(splits);
+  }
+
+  // ─── Mouse / touch fallback ────────────────────────────────────────
   _setupMouseFallback() {
     const canvas = this.rendererModule.canvas;
 
     const toWorld = (clientX, clientY) => {
-      const rect  = canvas.getBoundingClientRect();
-      const ndcX  = ((clientX - rect.left) / rect.width)  *  2 - 1;
-      const ndcY  = ((clientY - rect.top)  / rect.height) * -2 + 1;
+      const rect = canvas.getBoundingClientRect();
+      const ndcX =  ((clientX - rect.left) / rect.width)  * 2 - 1;
+      const ndcY = -((clientY - rect.top)  / rect.height) * 2 + 1;
       this._raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.cameraModule.cam);
       const target = new THREE.Vector3();
       this._raycaster.ray.intersectPlane(this._mousePlane, target);
       return target;
     };
 
+    // Mouse
     canvas.addEventListener('mousedown', (e) => {
       if (!this._mouseMode) return;
       this._mouseDown = true;
       const wp = toWorld(e.clientX, e.clientY);
       if (this.slingshot.state === 'idle') this.slingshot.grab(wp);
     });
-
     canvas.addEventListener('mousemove', (e) => {
       if (!this._mouseMode || !this._mouseDown) return;
-      const wp = toWorld(e.clientX, e.clientY);
-      if (this.slingshot.state === 'grabbed') this.slingshot.updatePull(wp);
+      if (this.slingshot.state === 'grabbed') this.slingshot.updatePull(toWorld(e.clientX, e.clientY));
     });
-
     canvas.addEventListener('mouseup', () => {
       if (!this._mouseMode || !this._mouseDown) return;
       this._mouseDown = false;
@@ -229,142 +391,60 @@ class GameController {
       }
     });
 
-    // Touch support
+    // Touch
     canvas.addEventListener('touchstart', (e) => {
       if (!this._mouseMode) return;
       e.preventDefault();
       this._mouseDown = true;
-      const t  = e.touches[0];
+      const t = e.touches[0];
       const wp = toWorld(t.clientX, t.clientY);
       if (this.slingshot.state === 'idle') this.slingshot.grab(wp);
     }, { passive: false });
-
     canvas.addEventListener('touchmove', (e) => {
       if (!this._mouseMode || !this._mouseDown) return;
       e.preventDefault();
-      const t  = e.touches[0];
-      const wp = toWorld(t.clientX, t.clientY);
-      if (this.slingshot.state === 'grabbed') this.slingshot.updatePull(wp);
+      const t = e.touches[0];
+      if (this.slingshot.state === 'grabbed') this.slingshot.updatePull(toWorld(t.clientX, t.clientY));
     }, { passive: false });
-
-    canvas.addEventListener('touchend', () => {
-      if (!this._mouseMode || !this._mouseDown) return;
+    canvas.addEventListener('touchend', (e) => {
+      if (!this._mouseMode) return;
       this._mouseDown = false;
       if (this.slingshot.state === 'grabbed') {
         this.slingshot.release();
         this._scheduleNextBird();
+      } else if (e.changedTouches.length > 0) {
+        // Tap on canvas while bird flying = activate
+        this._activateCurrentBird();
       }
+    });
+
+    // Desktop click while flying = activate ability
+    canvas.addEventListener('click', () => {
+      if (this._mouseMode) this._activateCurrentBird();
     });
   }
 
-  // ─── Keyboard shortcuts ───────────────────────────────────────────────────
-  _setupKeyboard() {
-    window.addEventListener('keydown', (e) => {
-      switch (e.code) {
-        case 'Space':
-          this._mouseMode = !this._mouseMode;
-          console.info(`[Game] Mouse mode: ${this._mouseMode}`);
-          break;
-        case 'KeyR':
-          this.reset();
-          break;
-        case 'KeyD':
-          this._debugVisible = !this._debugVisible;
-          debugPanel.classList.toggle('hidden', !this._debugVisible);
-          break;
-      }
-    });
-  }
-
-  // ─── Bird lifecycle ───────────────────────────────────────────────────────
-  _scheduleNextBird() {
-    setTimeout(() => this._spawnNextBird(), NEXT_BIRD_DELAY);
-  }
-
-  _spawnNextBird() {
-    if (this._birdsRemaining <= 0) {
-      this._showGameOver();
-      return;
-    }
-
-    // Check level clear
-    if (this.level.isCleared()) {
-      this._nextLevel();
-      return;
-    }
-
-    this._birdsRemaining--;
-    this._updateBirdsHUD();
-
-    this.currentBird = new Bird(this.sceneModule, this.physicsWorld);
-    this.slingshot.attachBird(this.currentBird);
-  }
-
-  // ─── Level progression ────────────────────────────────────────────────────
-  _nextLevel() {
-    if (this._currentLevel >= MAX_LEVELS) {
-      this._showGameOver(true);
-      return;
-    }
-    this._currentLevel++;
-    this.level.reset();
-    this.level.build(this._currentLevel);
-    this._birdsRemaining = TOTAL_BIRDS;
-    this._updateBirdsHUD();
-    this._updateLevelHUD();
-
-    this.currentBird = new Bird(this.sceneModule, this.physicsWorld);
-    this.slingshot.attachBird(this.currentBird);
-  }
-
-  // ─── Game over / reset ────────────────────────────────────────────────────
-  _showGameOver(win = false) {
-    finalScoreEl.textContent = this.scoreManager.getScore().toLocaleString();
-    const card = document.querySelector('.game-over-card');
-    const emoji = document.querySelector('.go-emoji');
-    const title = document.querySelector('.go-title');
-    if (win) {
-      emoji.textContent = '🏆';
-      title.textContent = 'You Win!';
-    } else {
-      emoji.textContent = '😡';
-      title.textContent = 'Game Over';
-    }
-    gameOverEl.classList.remove('hidden');
-  }
-
-  reset() {
-    gameOverEl.classList.add('hidden');
-
-    // Reset state
-    this._currentLevel   = 1;
-    this._birdsRemaining = TOTAL_BIRDS;
-
-    // Reset score
-    this.scoreManager.reset();
-
-    // Rebuild level
-    this.level.reset();
-    this.level.build(this._currentLevel);
-    this._updateLevelHUD();
-    this._updateBirdsHUD();
-
-    // Spawn fresh bird
-    this.currentBird = new Bird(this.sceneModule, this.physicsWorld);
-    this.slingshot.attachBird(this.currentBird);
-    this.slingshot.state = 'idle';
-
-    // Reset smoother
-    this.smoother?.reset();
-  }
-
-  // ─── HUD helpers ─────────────────────────────────────────────────────────
-  _updateBirdsHUD() {
-    birdsDisplay.textContent = `Birds: ${this._birdsRemaining}`;
-  }
-
+  // ─── HUD helpers ──────────────────────────────────────────────────
   _updateLevelHUD() {
-    levelDisplay.textContent = `Level ${this._currentLevel}`;
+    if (levelDisplayEl) levelDisplayEl.textContent = `Level ${this._currentLevel}`;
+  }
+
+  _renderBirdQueueHUD() {
+    if (!birdQueueEl) return;
+    birdQueueEl.innerHTML = '';
+    this._birdQueue.forEach((type, i) => {
+      const el = document.createElement('div');
+      const size = i === this._birdIndex ? 52 : (i < this._birdIndex ? 36 : 44);
+      el.className = 'bq-item'
+        + (i === this._birdIndex ? ' bq-current' : '')
+        + (i < this._birdIndex  ? ' bq-used'    : '');
+      el.style.width  = size + 'px';
+      el.style.height = size + 'px';
+
+      const labels = { red: '😡', yellow: '🟡', blue: '🔵', black: '💣' };
+      el.textContent = labels[type] ?? '😡';
+      birdQueueEl.appendChild(el);
+    });
   }
 
   _updateLoadStatus(msg) {
@@ -373,69 +453,92 @@ class GameController {
 
   _hideLoading() {
     loadingEl.classList.add('fade-out');
-    setTimeout(() => loadingEl.classList.add('gone'), 600);
+    setTimeout(() => loadingEl.classList.add('gone'), 700);
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // GAME LOOP (Spec §3.14 gameLoop)
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── World-to-screen helper ────────────────────────────────────────
+  _worldToScreen(worldPos) {
+    const v = worldPos.clone().project(this.cameraModule.cam);
+    return {
+      x: (v.x + 1) / 2 * window.innerWidth,
+      y: (-v.y + 1) / 2 * window.innerHeight,
+    };
+  }
+
+  // ═══ GAME LOOP ═══════════════════════════════════════════════════════════════
   _gameLoop(timestamp) {
     if (!this._running) return;
-    requestAnimationFrame((t) => this._gameLoop(t));
+    requestAnimationFrame(t => this._gameLoop(t));
 
-    // Delta time — capped to 50ms to avoid physics explosions on tab switch
     const dt = Math.min((timestamp - this._lastTime) / 1000, 0.05);
     this._lastTime = timestamp;
 
-    // ── Physics step ──
+    // Physics
     this.physicsWorld.step(dt);
 
-    // ── Update game objects ──
+    // Update scene (animated sky + clouds)
+    this.sceneModule.update(dt);
+
+    // Update particles
+    this.particles.update(dt);
+
+    // Score manager (combo timer)
+    this.scoreManager.update(dt);
+
+    // Update level objects
     this.level.update();
-    this.currentBird?.update(dt);
 
-    // ── Camera ──
-    if (this.currentBird?.state === 'flying') {
-      this.cameraModule.follow(this.currentBird.mesh.position, 0.03);
-    } else {
-      this.cameraModule.resetPosition(0.04);
+    // Update birds
+    this.activeBirds.forEach(b => b.update(dt));
+
+    // Level cleared?
+    if (this.slingshot.state === 'released' && this.level.isCleared()) {
+      if (this.currentBird?.state === 'landed' ||
+          this.activeBirds.every(b => b.state === 'landed')) {
+        this._showLevelComplete();
+        this.slingshot.state = 'idle';  // prevent re-trigger
+      }
     }
-    this.cameraModule.update();
 
-    // ── Slingshot band ──
+    // Camera follow
+    const flyingBird = this.activeBirds.find(b => b.state === 'flying');
+    if (flyingBird) {
+      this.cameraModule.follow(flyingBird.mesh.position, 0.035);
+    } else {
+      this.cameraModule.resetPosition(0.045);
+    }
+    this.cameraModule.update(dt);
+
+    // Slingshot band
     this.slingshot.drawBand();
 
-    // ── FPS counter ──
+    // FPS
     this._fpsFrames++;
-    this._fpsTimer += dt;
+    this._fpsTimer  += dt;
     if (this._fpsTimer >= 1.0) {
-      this._fps = this._fpsFrames;
+      this._fps       = this._fpsFrames;
       this._fpsFrames = 0;
       this._fpsTimer  = 0;
     }
-
-    // ── Debug panel update ──
     if (this._debugVisible) {
       dbgFps.textContent    = this._fps;
       dbgBodies.textContent = this.physicsWorld.bodyCount;
-      // gesture & pinch updated in onHandResults
     }
 
-    // ── Render ──
+    // Render
     this.rendererModule.render(this.sceneModule.scene, this.cameraModule.cam);
   }
 }
 
-// ─── Bootstrap ───────────────────────────────────────────────────────────────
+// ─── Bootstrap ────────────────────────────────────────────────────────────────
 const gameController = new GameController();
 
 window.addEventListener('load', async () => {
   try {
     await gameController.init();
-    window.__game = gameController;  // Dev console access
+    window.__game = gameController;
   } catch (err) {
     console.error('[Game] Fatal init error:', err);
-    const loadStatusEl = document.getElementById('loading-status');
     if (loadStatusEl) loadStatusEl.textContent = `Error: ${err.message}`;
   }
 });
