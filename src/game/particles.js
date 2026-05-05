@@ -210,7 +210,6 @@ export class ParticleSystem {
       const alpha = Math.max(0, p.life / p.maxLife);
       if (p.mesh.material?.opacity !== undefined) {
         p.mesh.material.opacity = alpha * (p.scale ? 0.7 : (p.gravity ? 1 : 0.65));
-        p.mesh.material.needsUpdate = false; // transparent flag already set
       }
 
       // Stop on ground

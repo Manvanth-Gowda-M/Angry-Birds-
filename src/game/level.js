@@ -198,7 +198,9 @@ export class Level {
       if (isPig) this._decoratePig(mesh, Math.min(w, h, d) * 0.5, kingPig);
 
       const startY = def.position[1];
-      const obj    = { mesh, body, startY, alive: true, isPig, kingPig, color };
+      // Store original color as THREE.Color for crack-effect reset guard
+      const origColor = new THREE.Color(color);
+      const obj    = { mesh, body, startY, alive: true, isPig, kingPig, color, cracked: false };
       this._objects.push(obj);
 
       // Collision → destruction
@@ -212,12 +214,11 @@ export class Level {
         }
         if (impulse > DESTROY_IMPULSE) {
           this._destroyObject(obj);
-        } else if (impulse > 3) {
-          // Crack effect — slightly darken the block
+        } else if (impulse > 3 && !obj.cracked) {
+          // Crack effect — darken once; store original to avoid cumulative darkening
+          obj.cracked = true;
           if (obj.mesh.material && !obj.mesh.material.transparent) {
-            const c = new THREE.Color(obj.color);
-            c.multiplyScalar(0.78);
-            obj.mesh.material.color.copy(c);
+            obj.mesh.material.color.copy(origColor.clone().multiplyScalar(0.72));
           }
         }
       });

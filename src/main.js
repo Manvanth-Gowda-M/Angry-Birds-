@@ -292,6 +292,7 @@ class GameController {
 
   _proceedNextLevel() {
     levelCompleteEl.classList.add('hidden');
+    this._levelCompleteShown = false;
     if (this._currentLevel >= MAX_LEVELS) {
       this._showGameOver(true);
       return;
@@ -317,7 +318,8 @@ class GameController {
     gameOverEl.classList.add('hidden');
     levelCompleteEl.classList.add('hidden');
 
-    this._currentLevel = 1;
+    this._currentLevel       = 1;
+    this._levelCompleteShown = false;
     this.scoreManager.reset();
 
     this.level.reset();
@@ -435,9 +437,10 @@ class GameController {
     this._birdQueue.forEach((type, i) => {
       const el = document.createElement('div');
       const size = i === this._birdIndex ? 52 : (i < this._birdIndex ? 36 : 44);
-      el.className = 'bq-item'
-        + (i === this._birdIndex ? ' bq-current' : '')
-        + (i < this._birdIndex  ? ' bq-used'    : '');
+      el.className = ['bq-item',
+        i === this._birdIndex ? 'bq-current' : '',
+        i < this._birdIndex   ? 'bq-used'    : '',
+      ].filter(Boolean).join(' ');
       el.style.width  = size + 'px';
       el.style.height = size + 'px';
 
@@ -492,11 +495,13 @@ class GameController {
     this.activeBirds.forEach(b => b.update(dt));
 
     // Level cleared?
-    if (this.slingshot.state === 'released' && this.level.isCleared()) {
+    if (!this._levelCompleteShown && this.slingshot.state === 'released'
+        && this.level.isCleared()) {
       if (this.currentBird?.state === 'landed' ||
           this.activeBirds.every(b => b.state === 'landed')) {
+        this._levelCompleteShown = true;
         this._showLevelComplete();
-        this.slingshot.state = 'idle';  // prevent re-trigger
+        this.slingshot.state = 'idle';
       }
     }
 

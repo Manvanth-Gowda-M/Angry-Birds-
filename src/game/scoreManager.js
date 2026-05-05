@@ -144,7 +144,7 @@ export class ScoreManager {
     el.className = 'score-popup' + (type ? ` ${type}` : '');
     el.textContent = text;
 
-    // Position: randomize horizontally near the centre of the screen
+    // Position: randomize horizontally near the center of the screen
     // or near the given screen position
     const vw = window.innerWidth;
     const vh = window.innerHeight;
@@ -155,7 +155,7 @@ export class ScoreManager {
 
     this._popupEl.appendChild(el);
     el.addEventListener('animationend', () => el.remove(), { once: true });
-    // Fallback removal
-    setTimeout(() => el.remove(), 1600);
+    // Fallback removal — slightly longer than CSS animation (1.4s) to avoid race
+    setTimeout(() => el.remove(), 1500);
   }
 }
